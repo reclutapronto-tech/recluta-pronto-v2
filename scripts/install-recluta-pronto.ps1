@@ -22,6 +22,16 @@ foreach ($relative in $directories) {
     $path = Join-Path $InstallRoot $relative
     if (-not (Test-Path -LiteralPath $path) -and $PSCmdlet.ShouldProcess($path, 'Crear directorio')) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
 }
+$workflowTarget = Join-Path $InstallRoot 'n8n-workflows'
+if (-not (Test-Path -LiteralPath $workflowTarget) -and $PSCmdlet.ShouldProcess($workflowTarget, 'Crear directorio de workflows')) {
+    New-Item -ItemType Directory -Path $workflowTarget -Force | Out-Null
+}
+if (Test-Path -LiteralPath (Join-Path $repoRoot 'workflows')) {
+    Get-ChildItem -LiteralPath (Join-Path $repoRoot 'workflows') -Filter '*.json' | ForEach-Object {
+        $destination = Join-Path $workflowTarget $_.Name
+        if ($PSCmdlet.ShouldProcess($destination, 'Copiar workflow n8n')) { Copy-Item -LiteralPath $_.FullName -Destination $destination -Force }
+    }
+}
 $envPath = Join-Path $InstallRoot '.env'
 $envExample = Join-Path $repoRoot '.env.example'
 if (-not (Test-Path -LiteralPath $envPath)) {

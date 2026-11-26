@@ -1,0 +1,9 @@
+﻿{
+  "name": "Recluta Pronto - Prospeccion Muse",
+  "nodes": [
+    {"parameters":{"httpMethod":"POST","path":"recluta/prospeccion","responseMode":"responseNode"},"id":"prospect-webhook","name":"Recibir oportunidad Muse","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"webhookId":"recluta-prospeccion"},
+    {"parameters":{"respondWith":"json","responseBody":"={{ {status: 'received', engine: 'prospeccion', source: 'muse', opportunity: $json} }}"},"id":"response","name":"Registrar oportunidad","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[280,0]}
+  ],
+  "connections":{"Recibir oportunidad Muse":{"main":[[{"node":"Registrar oportunidad","type":"main","index":0}]]}},
+  "active":false,"settings":{"executionOrder":"v1"},"versionId":"recluta-prospeccion-v1","meta":{"templateCredsSetupCompleted":true}
+}

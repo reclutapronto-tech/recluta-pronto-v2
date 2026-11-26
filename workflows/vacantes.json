@@ -1,0 +1,10 @@
+﻿{
+  "name": "Recluta Pronto - Vacantes",
+  "nodes": [
+    {"parameters":{"httpMethod":"POST","path":"recluta/vacantes","responseMode":"responseNode"},"id":"vacantes-webhook","name":"Receibir vacante","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"webhookId":"recluta-vacantes"},
+    {"parameters":{"method":"POST","url":"={{$env.DOCLING_URL || 'http://docling-serve:5001' + '/v1alpha/convert/source'}}","sendBody":true,"specifyBody":"json","jsonBody":"={{$json}}","options":{}},"id":"docling","name":"Extraer documento","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[240,0]},
+    {"parameters":{"respondWith":"json","responseBody":"={{ {status: 'received', engine: 'vacantes', extraction: $json} }}"},"id":"response","name":"Responder","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[480,0]}
+  ],
+  "connections":{"Receibir vacante":{"main":[[{"node":"Extraer documento","type":"main","index":0}]]},"Extraer documento":{"main":[[{"node":"Responder","type":"main","index":0}]]}},
+  "active":false,"settings":{"executionOrder":"v1"},"versionId":"recluta-vacantes-v1","meta":{"templateCredsSetupCompleted":true}
+}

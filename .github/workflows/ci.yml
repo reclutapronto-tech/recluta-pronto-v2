@@ -47,6 +47,14 @@ jobs:
           test -f MISSION.md
           git diff --check
 
+      - name: Validate n8n workflow definitions
+        shell: pwsh
+        run: |
+          Get-ChildItem workflows -Filter '*.json' | ForEach-Object {
+            $workflow = Get-Content $_.FullName -Raw | ConvertFrom-Json
+            if (-not $workflow.name -or -not $workflow.nodes -or -not $workflow.connections) { throw "Invalid n8n workflow: $($_.Name)" }
+          }
+
       - name: Validate PowerShell installer syntax
         shell: pwsh
         run: |

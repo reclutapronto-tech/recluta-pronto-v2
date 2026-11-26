@@ -1,0 +1,10 @@
+﻿{
+  "name": "Recluta Pronto - Reclutamiento WhatsApp",
+  "nodes": [
+    {"parameters":{"httpMethod":"POST","path":"recluta/reclutamiento","responseMode":"responseNode"},"id":"recruit-webhook","name":"Recibir WhatsApp","type":"n8n-nodes-base.webhook","typeVersion":2,"position":[0,0],"webhookId":"recluta-reclutamiento"},
+    {"parameters":{"method":"POST","url":"={{$env.EVOLUTION_API_URL || 'http://evolution-api:8080' + '/message/sendText/' + ($json.instance || 'default')}}","sendBody":true,"specifyBody":"json","jsonBody":"={{ {number: $json.number, text: $json.reply || 'Solicitud recibida. Cintia revisará tu información.'} }}","options":{}},"id":"evolution","name":"Responder por WhatsApp","type":"n8n-nodes-base.httpRequest","typeVersion":4.2,"position":[280,0]},
+    {"parameters":{"respondWith":"json","responseBody":"={{ {status: 'received', engine: 'reclutamiento'} }}"},"id":"response","name":"Confirmar","type":"n8n-nodes-base.respondToWebhook","typeVersion":1.1,"position":[560,0]}
+  ],
+  "connections":{"Recibir WhatsApp":{"main":[[{"node":"Responder por WhatsApp","type":"main","index":0}]]},"Responder por WhatsApp":{"main":[[{"node":"Confirmar","type":"main","index":0}]]}},
+  "active":false,"settings":{"executionOrder":"v1"},"versionId":"recluta-reclutamiento-v1","meta":{"templateCredsSetupCompleted":true}
+}
