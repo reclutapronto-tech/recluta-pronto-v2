@@ -70,6 +70,14 @@ jobs:
             exit 1
           }
 
+      - name: Validate E2E smoke script syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts/e2e-smoke.ps1'), [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }
+
       - name: Check installer references an existing Compose file
         shell: bash
         run: |
