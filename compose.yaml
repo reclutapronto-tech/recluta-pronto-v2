@@ -1,0 +1,119 @@
+name: recluta-pronto-v2
+
+services:
+  mariadb:
+    image: mariadb:10.6
+    restart: unless-stopped
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Set MARIADB_ROOT_PASSWORD in a local .env}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-frappe}
+      MARIADB_USER: ${MARIADB_USER:-frappe}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:?Set MARIADB_PASSWORD in a local .env}
+    volumes:
+      - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb-admin ping -h localhost -u root -p$$MARIADB_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  redis-cache:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/redis-cache:/data
+
+  redis-queue:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/redis-queue:/data
+
+  evolution-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    profiles: [integrations]
+    environment:
+      POSTGRES_DB: ${EVOLUTION_POSTGRES_DB:-evolution}
+      POSTGRES_USER: ${EVOLUTION_POSTGRES_USER:-evolution}
+      POSTGRES_PASSWORD: ${EVOLUTION_POSTGRES_PASSWORD:?Set EVOLUTION_POSTGRES_PASSWORD in a local .env}
+    volumes:
+      - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/evolution-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  frappe:
+    image: ${FRAPPE_IMAGE:-frappe/erpnext:v15}
+    restart: unless-stopped
+    profiles: [erpnext]
+    depends_on:
+      mariadb: { condition: service_healthy }
+      redis-cache: { condition: service_started }
+      redis-queue: { condition: service_started }
+    environment:
+      DB_HOST: mariadb
+      DB_PORT: 3306
+      MYSQL_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Set MARIADB_ROOT_PASSWORD in a local .env}
+      REDIS_CACHE: redis://redis-cache:6379
+      REDIS_QUEUE: redis://redis-queue:6379
+      # The official ERPNext image contains the ERPNext app. HRMS is installed
+      # into the same bench/site by the bootstrap script (see scripts/README.md).
+      FRAPPE_SITE_NAME: ${FRAPPE_SITE_NAME:-recluta.localhost}
+      FRAPPE_APPS: ${FRAPPE_APPS:-erpnext,hrms}
+    ports:
+      - "${FRAPPE_PORT:-8000}:8000"
+    volumes:
+      - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/frappe-sites:/home/frappe/frappe-bench/sites
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/method/ping >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  evolution-api:
+    image: ${EVOLUTION_IMAGE:-atendai/evolution-api:v2.2.3}
+    restart: unless-stopped
+    profiles: [integrations]
+    depends_on:
+      redis-queue: { condition: service_started }
+      evolution-postgres: { condition: service_healthy }
+    environment:
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?Set EVOLUTION_API_KEY in a local .env}
+      SERVER_PORT: 8080
+      DATABASE_PROVIDER: ${EVOLUTION_DATABASE_PROVIDER:-postgresql}
+      DATABASE_CONNECTION_URI: ${EVOLUTION_DATABASE_CONNECTION_URI:-postgresql://evolution:${EVOLUTION_POSTGRES_PASSWORD}@evolution-postgres:5432/evolution}
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis-queue:6379
+    ports:
+      - "${EVOLUTION_PORT:-8080}:8080"
+    volumes:
+      - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/evolution:/evolution/instances
+
+  docling-serve:
+    image: ${DOCLING_IMAGE:-quay.io/docling-project/docling-serve:latest}
+    restart: unless-stopped
+    profiles: [integrations]
+    ports:
+      - "${DOCLING_PORT:-5001}:5001"
+    volumes:
+      - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/docling:/data
+
+  n8n:
+    image: ${N8N_IMAGE:-n8nio/n8n:latest}
+    restart: unless-stopped
+    profiles: [integrations]
+    environment:
+      N8N_HOST: ${N8N_HOST:-localhost}
+      N8N_PORT: 5678
+      N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in a local .env}
+      N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+    ports:
+      - "${N8N_PORT:-5678}:5678"
+    volumes:
+      - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/n8n:/home/node/.n8n
+

@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for committed secrets and personal data
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git grep -nI -E '(BEGIN (RSA|OPENSSH|EC) PRIVATE KEY|ghp_[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16})' -- . ':!MISSION.md'; then
+            echo 'Potential secret detected in tracked files.' >&2
+            exit 1
+          fi
+
+      - name: Validate Docker Compose syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          files=()
+          for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+            [[ -f "$f" ]] && files+=("$f")
+          done
+          if ((${#files[@]} == 0)); then
+            echo 'No Compose file present; syntax validation skipped.'
+            exit 0
+          fi
+          docker compose -f "${files[0]}" config --quiet
+
+      - name: Validate repository metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f MISSION.md
+          git diff --check
+
+      - name: Validate PowerShell installer syntax
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/install-recluta-pronto.ps1'),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors -and $errors.Count -gt 0) {
+            $errors | ForEach-Object { Write-Error $_.Message }
+            exit 1
+          }
+
+      - name: Check installer references an existing Compose file
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f compose.yaml || test -f compose.yml || test -f docker-compose.yaml || test -f docker-compose.yml
+
