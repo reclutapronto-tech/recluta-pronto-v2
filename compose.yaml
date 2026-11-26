@@ -86,7 +86,7 @@ services:
       retries: 10
 
   evolution-api:
-    image: ${EVOLUTION_IMAGE:-atendai/evolution-api:v2.2.3}
+    image: ${EVOLUTION_IMAGE:-evoapicloud/evolution-api:v2.3.8}
     restart: unless-stopped
     deploy:
       resources: { limits: { cpus: '1.0', memory: 768M } }
