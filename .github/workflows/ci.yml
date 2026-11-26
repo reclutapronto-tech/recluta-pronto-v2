@@ -37,7 +37,8 @@ jobs:
             echo 'No Compose file present; syntax validation skipped.'
             exit 0
           fi
-          docker compose -f "${files[0]}" config --quiet
+          MARIADB_ROOT_PASSWORD=ci-root MARIADB_PASSWORD=ci-pass EVOLUTION_POSTGRES_PASSWORD=ci-evolution EVOLUTION_API_KEY=ci-api-key N8N_ENCRYPTION_KEY=ci-encryption \
+            docker compose -f "${files[0]}" config --quiet
 
       - name: Validate repository metadata
         shell: bash
