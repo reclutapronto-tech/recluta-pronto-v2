@@ -4,6 +4,9 @@ services:
   mariadb:
     image: mariadb:10.6
     restart: unless-stopped
+    deploy:
+      resources:
+        limits: { cpus: '1.5', memory: 1536M }
     command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
     environment:
       MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:?Set MARIADB_ROOT_PASSWORD in a local .env}
@@ -21,18 +24,24 @@ services:
   redis-cache:
     image: redis:7-alpine
     restart: unless-stopped
+    deploy:
+      resources: { limits: { cpus: '0.25', memory: 256M } }
     volumes:
       - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/redis-cache:/data
 
   redis-queue:
     image: redis:7-alpine
     restart: unless-stopped
+    deploy:
+      resources: { limits: { cpus: '0.25', memory: 256M } }
     volumes:
       - ${RECLUTA_DATA_ROOT:-D:/ReclutaProntoData}/redis-queue:/data
 
   evolution-postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    deploy:
+      resources: { limits: { cpus: '0.75', memory: 768M } }
     profiles: [integrations]
     environment:
       POSTGRES_DB: ${EVOLUTION_POSTGRES_DB:-evolution}
@@ -49,6 +58,8 @@ services:
   frappe:
     image: ${FRAPPE_IMAGE:-frappe/erpnext:v15}
     restart: unless-stopped
+    deploy:
+      resources: { limits: { cpus: '2.0', memory: 3072M } }
     profiles: [erpnext]
     depends_on:
       mariadb: { condition: service_healthy }
@@ -77,6 +88,8 @@ services:
   evolution-api:
     image: ${EVOLUTION_IMAGE:-atendai/evolution-api:v2.2.3}
     restart: unless-stopped
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 768M } }
     profiles: [integrations]
     depends_on:
       redis-queue: { condition: service_started }
@@ -96,7 +109,9 @@ services:
   docling-serve:
     image: ${DOCLING_IMAGE:-quay.io/docling-project/docling-serve:latest}
     restart: unless-stopped
-    profiles: [integrations]
+    profiles: [docling]
+    deploy:
+      resources: { limits: { cpus: '2.0', memory: 4096M } }
     ports:
       - "${DOCLING_PORT:-5001}:5001"
     volumes:
@@ -105,6 +120,8 @@ services:
   n8n:
     image: ${N8N_IMAGE:-n8nio/n8n:latest}
     restart: unless-stopped
+    deploy:
+      resources: { limits: { cpus: '1.0', memory: 1024M } }
     profiles: [integrations]
     environment:
       N8N_HOST: ${N8N_HOST:-localhost}
@@ -112,6 +129,9 @@ services:
       N8N_PROTOCOL: ${N8N_PROTOCOL:-http}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in a local .env}
       N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE:-false}
+      EXECUTIONS_MODE: regular
+      N8N_RUNNERS_ENABLED: "true"
+      N8N_CONCURRENCY: ${N8N_CONCURRENCY:-2}
     ports:
       - "${N8N_PORT:-5678}:5678"
     volumes:
