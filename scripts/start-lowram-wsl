@@ -1,0 +1,13 @@
+﻿#!/usr/bin/env bash
+set -Eeuo pipefail
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+install_root="${RECLUTA_INSTALL_ROOT:-/mnt/d/ReclutaProntoOS-V2}"
+env_file="$install_root/.env"
+if [[ ! -f "$env_file" ]]; then echo "Missing $env_file; copy .env.wsl.example and set local secrets." >&2; exit 2; fi
+command -v docker >/dev/null || { echo 'Docker Engine is not installed.' >&2; exit 2; }
+docker info >/dev/null
+mkdir -p /mnt/d/ReclutaProntoData/{mariadb,redis-cache,redis-queue,evolution-postgres,evolution,docling,n8n,frappe-sites,backups,n8n-workflows}
+cp -f "$repo_root"/workflows/*.json /mnt/d/ReclutaProntoData/n8n-workflows/
+profiles=(--profile erpnext --profile integrations)
+[[ "${WITH_DOCLING:-0}" == 1 ]] && profiles+=(--profile docling)
+exec docker compose --env-file "$env_file" -f "$repo_root/compose.yaml" "${profiles[@]}" up -d --remove-orphans
