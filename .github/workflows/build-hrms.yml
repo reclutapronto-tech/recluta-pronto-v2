@@ -1,0 +1,127 @@
+name: Build HRMS v15
+on:
+  push:
+    branches: ['build/hrms-v15-*']
+    paths: ['.github/workflows/build-hrms.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  packages: write
+concurrency:
+  group: recluta-hrms-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      FRAPPE_VERSION: '15.128.0'
+      ERPNEXT_VERSION: '15.127.0'
+    steps:
+      - name: Resolve official source versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git ls-remote --exit-code --tags https://github.com/frappe/frappe.git "refs/tags/v${FRAPPE_VERSION}" >/dev/null
+          git ls-remote --exit-code --tags https://github.com/frappe/erpnext.git "refs/tags/v${ERPNEXT_VERSION}" >/dev/null
+          hv=$(git ls-remote --tags --refs https://github.com/frappe/hrms.git 'refs/tags/v15.*' | awk '{sub("refs/tags/","",$2);if($2 ~ /^v15\.[0-9]+\.[0-9]+$/)print $2}' | sort -V | tail -1)
+          [[ "$hv" =~ ^v15\.[0-9]+\.[0-9]+$ ]]
+          git clone --depth 1 https://github.com/frappe/frappe_docker.git "$RUNNER_TEMP/frappe_docker"
+          revision=$(git -C "$RUNNER_TEMP/frappe_docker" rev-parse HEAD)
+          test -f "$RUNNER_TEMP/frappe_docker/images/custom/Containerfile"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}/frappe-hrms"
+          tag="${FRAPPE_VERSION}-${ERPNEXT_VERSION}-${hv}-${GITHUB_SHA:0:12}-${GITHUB_RUN_ATTEMPT}"
+          jq -n --arg ev "v$ERPNEXT_VERSION" --arg hv "$hv" '[{url:"https://github.com/frappe/erpnext",branch:$ev},{url:"https://github.com/frappe/hrms",branch:$hv}]' > "$RUNNER_TEMP/apps.json"
+          printf 'hrms=%s\nimage=%s\ntag=%s\nrevision=%s\n' "$hv" "$image" "$tag" "$revision" >> "$GITHUB_OUTPUT"
+          echo "Frappe $FRAPPE_VERSION | ERPNext $ERPNEXT_VERSION | HRMS $hv | frappe_docker $revision"
+      - name: Build official custom image on GitHub
+        shell: bash
+        env:
+          IMAGE: ${{ steps.versions.outputs.image }}
+          TAG: ${{ steps.versions.outputs.tag }}
+          DOCKER_BUILDKIT: '1'
+        run: |
+          set -euo pipefail
+          df -h / /var/lib/docker
+          docker build --progress=plain \
+            --file "$RUNNER_TEMP/frappe_docker/images/custom/Containerfile" \
+            --build-arg "FRAPPE_BRANCH=v$FRAPPE_VERSION" \
+            --build-arg PYTHON_VERSION=3.11 \
+            --build-arg NODE_VERSION=20 \
+            --build-arg DEBIAN_BASE=bookworm \
+            --build-arg WKHTMLTOPDF_DISTRO=bookworm \
+            --secret "id=apps_json,src=$RUNNER_TEMP/apps.json" \
+            --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+            --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag "$IMAGE:$TAG" "$RUNNER_TEMP/frappe_docker"
+      - name: Verify installed code versions and assets
+        shell: bash
+        env:
+          IMAGE: ${{ steps.versions.outputs.image }}
+          TAG: ${{ steps.versions.outputs.tag }}
+          HRMS_VERSION: ${{ steps.versions.outputs.hrms }}
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --entrypoint /home/frappe/frappe-bench/env/bin/python "$IMAGE:$TAG" -c 'import sys,frappe,erpnext,hrms; actual=[x.__version__.lstrip("v") for x in (frappe,erpnext,hrms)]; expected=[x.lstrip("v") for x in sys.argv[1:]]; assert actual==expected,(actual,expected); print(actual)' "$FRAPPE_VERSION" "$ERPNEXT_VERSION" "$HRMS_VERSION"
+          docker run --rm --network none --entrypoint bash "$IMAGE:$TAG" -ec 'cd /home/frappe/frappe-bench; test -d apps/hrms; test -d apps/frappe; test -d apps/erpnext; command -v nginx; command -v node; command -v bench'
+      - name: Real HRMS installation in disposable CI database
+        shell: bash
+        env:
+          IMAGE: ${{ steps.versions.outputs.image }}
+          TAG: ${{ steps.versions.outputs.tag }}
+        run: |
+          set -euo pipefail
+          dbpass=$(openssl rand -hex 24)
+          adminpass=$(openssl rand -hex 24)
+          echo "::add-mask::$dbpass"
+          echo "::add-mask::$adminpass"
+          docker network create rp-ci
+          trap 'docker rm -f rp-ci-db rp-ci-cache rp-ci-queue >/dev/null 2>&1 || true; docker network rm rp-ci >/dev/null 2>&1 || true' EXIT
+          docker run -d --name rp-ci-db --network rp-ci --network-alias mariadb -e MARIADB_ROOT_PASSWORD="$dbpass" -e MARIADB_ROOT_HOST=% mariadb:10.6 --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --skip-character-set-client-handshake
+          docker run -d --name rp-ci-cache --network rp-ci --network-alias redis-cache redis:7-alpine
+          docker run -d --name rp-ci-queue --network rp-ci --network-alias redis-queue redis:7-alpine
+          ready=false
+          for i in $(seq 1 60); do
+            if docker exec rp-ci-db sh -ec 'mariadb -h127.0.0.1 -uroot -p"$MARIADB_ROOT_PASSWORD" -e "SELECT 1"' >/dev/null 2>&1; then ready=true; break; fi
+            sleep 2
+          done
+          "$ready"
+          docker run --rm --network rp-ci -e CI_DB_PASS="$dbpass" -e CI_ADMIN_PASS="$adminpass" --entrypoint bash "$IMAGE:$TAG" -ec '
+            cd /home/frappe/frappe-bench
+            bench set-config -g db_host mariadb
+            bench set-config -g redis_cache redis://redis-cache:6379
+            bench set-config -g redis_queue redis://redis-queue:6379
+            bench set-config -g redis_socketio redis://redis-queue:6379
+            bench new-site ci.localhost --db-host mariadb --db-root-username root --db-root-password "$CI_DB_PASS" --admin-password "$CI_ADMIN_PASS" --mariadb-user-host-login-scope="%" --install-app erpnext
+            bench --site ci.localhost install-app hrms
+            bench --site ci.localhost migrate
+            apps=$(bench --site ci.localhost list-apps --format text)
+            printf "%s\n" "$apps"
+            for app in frappe erpnext hrms; do grep -Eq "^$app[[:space:]]" <<< "$apps"; done
+          '
+      - name: Publish only after tests pass
+        shell: bash
+        env:
+          IMAGE: ${{ steps.versions.outputs.image }}
+          TAG: ${{ steps.versions.outputs.tag }}
+          HRMS_VERSION: ${{ steps.versions.outputs.hrms }}
+          REVISION: ${{ steps.versions.outputs.revision }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "$IMAGE:$TAG"
+          digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE:$TAG")
+          test -n "$digest"
+          {
+            echo '## HRMS image verified and published'
+            echo "- Frappe: $FRAPPE_VERSION"
+            echo "- ERPNext: $ERPNEXT_VERSION"
+            echo "- HRMS: $HRMS_VERSION"
+            echo "- frappe_docker revision: $REVISION"
+            echo "- Image: \`$IMAGE:$TAG\`"
+            echo "- Digest: \`$digest\`"
+            echo "- Pull: \`docker pull $digest\`"
+          } >> "$GITHUB_STEP_SUMMARY"
